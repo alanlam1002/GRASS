@@ -2,7 +2,7 @@ module constrain_mod
   use precision_mod, only: wp
   use para_mod, only: SDIV, MDIV, DS, DM, r_e, s_gp, mu, rho, gama, alpha, ww, &
                       energy, pressure, sphi, mphi_r, B_coup, pi, has_scalar, velocity_sq, &
-                      angular_collocation, COLLOCATION_UNI, w_mu, output
+                      angular_collocation, COLLOCATION_UNI, w_mu, output, enthalpy
   use ope_eq_mod, only: laplacian_operator, gradient_vector
   implicit none
   private
@@ -78,13 +78,15 @@ contains
     !write(*,*) " "
     !write(*,'(16es8.1)') Vphi(:,1)
 
-    if (.false.) then
+    if (.true.) then
       open(newunit=unit, file="./Cont/hamiltonian.dat", status="replace", action="write", iostat=ios)
       if (ios == 0) then
         write(unit,"(2(i0,2X))") SDIV, MDIV
         do s = 1, SDIV
           do m = 1, MDIV
-            write(unit, "(3es24.15)") s_gp(s), mu(m), ham(s,m)
+            write(unit, "(13es24.15)") s_gp(s), mu(m), r_phys(s), ham(s,m), enthalpy(s,m), &
+                                        ww(s,m), velocity_sq(s,m), rho(s,m), gama(s,m), alpha(s,m), &
+                                        rhoH(s,m), ricci(s,m), KK(s,m)
           end do
         end do
         close(unit)

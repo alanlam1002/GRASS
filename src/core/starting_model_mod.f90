@@ -17,9 +17,16 @@ module starting_model_mod
 contains
   subroutine initialize_starting_model()
     external :: restart_read, refine_read
-    real(wp) :: target_mphi
+    real(wp) :: target_mphi, target_r_ratio
     integer :: regrid_status
     character(len=256) :: regrid_error
+
+    ! Captured before regrid_read can clobber r_ratio with the restart
+    ! file's own stored value -- lets a MODE_REGRID run target a NEW
+    ! r_ratio (e.g. one step of a gradual spin-up sequence) while still
+    ! inheriting the previous run's converged 2D fields as its initial
+    ! guess.
+    target_r_ratio = r_ratio
 
     select case (run_mode)
     case (MODE_REGRID)
@@ -28,12 +35,22 @@ contains
         write(error_unit, '(A)') trim(regrid_error)
         error stop "initialize_starting_model: regrid_read failed"
       end if
-      e_center = .74e15_wp
-      e_center = e_center * C * C * KSCALE
+      r_ratio = target_r_ratio
+      ! e_center intentionally left as regrid_read restored it (from the
+      ! previous converged run) rather than the old hard-coded .74e15_wp --
+      ! that hard-code ignored e_center_default/the previous model's own
+      ! central density entirely.
       p_center = p_at_e(e_center)
       h_center = h_at_p(p_center)
     case default
-      r_ratio  = merge(0.9_wp, 1._wp, trim(adjustl(solver_type)) == "uryu")
+      ! r_ratio is left as configured in para_panel.f90 (target axis ratio
+      ! for this run -- 1.0 = non-rotating/TOV) -- previously this branch
+      ! unconditionally overwrote it with a solver_type-based guess
+      ! (0.9 for "uryu", 1.0 otherwise), and single_model() below then
+      ! unconditionally overwrote it again to 0.7, so any configured value
+      ! never actually reached rotation_solver. sphere() itself (called
+      ! just below) is a purely spherical 1-D TOV integration and does not
+      ! depend on r_ratio either way.
       e_center = e_center_default
       e_center = e_center * C * C * KSCALE
       p_center = p_at_e(e_center)
@@ -59,7 +76,8 @@ contains
       use para_mod, only: run_task, OneModel
       use constrain_mod, only: hamiltonian
       real(wp) :: ee, rho0, hamL2, t0, t1
-      r_ratio = 0.7_wp
+      ! r_ratio intentionally NOT overwritten here anymore -- see the
+      ! comment in initialize_starting_model's case-default branch above.
 
       output = .true.; call cpu_time(t0)
           call rotation_solver

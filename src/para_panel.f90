@@ -4,7 +4,7 @@ module para_mod
   ! -- Theory selection ------------------------------------------------------
   integer, parameter :: THEORY_GR = 0
   integer, parameter :: THEORY_ST = 1
-  integer :: active_theory = THEORY_ST
+  integer :: active_theory = THEORY_GR
 
   ! -- Model-family selection -------------------------------------------------
   integer, parameter :: MODEL_NS = 1
@@ -15,15 +15,15 @@ module para_mod
   ! -- Running option --------------------------------------------------------
   integer, parameter :: MODE_REGRID  = 1, MODE_DEFAULT = 2
 
-  integer :: run_mode = MODE_DEFAULT
+  integer :: run_mode = MODE_REGRID  ! isolate mass vs shape at default e_center
 
   ! -- Running mode ----------------------------------------------------------
   integer, parameter :: shoot = 1, MRbuild = 2, OneModel = 3
-  integer :: run_task = shoot 
+  integer :: run_task = OneModel
 
   ! -- Rotation configuration ------------------------------------------------
   ! uniform / const_j / uryu
-  character(len=20) :: solver_type = "uniform"
+  character(len=20) :: solver_type = "uryu"
   integer, parameter :: COLLOCATION_UNI = 1, COLLOCATION_LEG = 2, COLLOCATION_CHEB = 3
   integer :: angular_collocation = COLLOCATION_LEG
 
@@ -42,7 +42,7 @@ module para_mod
   integer :: MDIV = 41
 
   ! -- Target quantities -----------------------------------------------------
-  character(len=128) :: eos_file = "MPA1"
+  character(len=128) :: eos_file = "DD2_hot_equal_pinned"
   real(wp) :: M_goal   = 1.2_wp
   real(wp) :: Mb_goal  = 2._wp
   real(wp) :: J_goal   = 1.6_wp
@@ -54,8 +54,8 @@ module para_mod
 
   ! -- Rotation-law parameters (KEH, Uryu enabled) --------------------------
   real(wp) :: A_diff  = 0.5_wp
-  real(wp) :: lambda1 = 1.5_wp
-  real(wp) :: lambda2 = 0.3_wp
+  real(wp) :: lambda1 = 1.28_wp
+  real(wp) :: lambda2 = 0.72_wp
   integer :: uryu_p  = 1
   integer :: uryu_q  = 3
 
@@ -128,7 +128,7 @@ module para_mod
   real(wp) :: Omega_e = 0.0_wp
   real(wp) :: Omega_K = 0.0_wp
   real(wp) :: r_e     = 1.0_wp
-  real(wp) :: r_ratio = 1.0_wp
+  real(wp) :: r_ratio = 0.85_wp  ! lambda strengthening at r_ratio=0.85
   real(wp) :: r_circ  = 0.0_wp
   real(wp) :: ang_mom = 0.0_wp
   real(wp) :: mass    = 0.0_wp
@@ -168,8 +168,33 @@ module para_mod
   real(wp), parameter :: TOV_RMIN  = 1.e-15_wp
   real(wp), parameter :: KAPPA     = 1.e-15_wp * C**2 / G
   real(wp), parameter :: KSCALE    = KAPPA * G / C**4
-  real(wp), parameter :: E_SURFACE = 7.8_wp * C**2 * KSCALE
-  real(wp), parameter :: P_SURFACE = 1.01e8_wp * KSCALE
+  ! DD2_hot_equal(_pinned) is a hot merger-remnant profile, not a cold NS
+  ! crust EOS -- it doesn't extend down anywhere near the standard
+  ! iron-density vacuum surface (7.8 g/cm^3, 1.01e8 dyn/cm^2) these two
+  ! defaults assume. sphere_mod's TOV integrator has no iteration cap, so
+  ! with the standard defaults it runs (near-)forever trying to reach a
+  ! pressure the table was never built to cover, extrapolating off the
+  ! table's first cell the whole way. Re-pointed at this table's own
+  ! low-density floor instead (row 5 of eos/DD2_hot_equal_pinned.dat,
+  ! e=2.404e3 g/cm^3, p=7.253e21 dyn/cm^2 -- a few rows in from the table's
+  ! edge, not the very first row, so this is reached by direct
+  ! interpolation, not by extrapolating past the table).
+  ! Test: does MPA1 also degrade under rotation if ITS surface is raised to
+  ! match DD2_hot_equal_pinned's absolute cutoff level? Row 130 of MPA1.dat
+  ! (e=1.9967e3, p=1.0345e18), directly tabulated -- no extrapolation.
+  ! Now within reach of the standard near-vacuum convention (~7.8 g/cm^3)
+  ! thanks to the polytropic low-density extension -- row 52 of the
+  ! extended DD2_hot_equal_pinned.dat, directly tabulated, no extrapolation
+  ! needed. Gamma for this extension is now FIXED at 1.58425 (the Read
+  ! et al. 2009 / MPA1-floor literature low-density-crust value) rather
+  ! than matched to DD2's own softer (Gamma~0.95) edge slope -- the old,
+  ! sub-linear Gamma<1 tail gave low-mass stars an unboundedly-growing
+  ! radius (Newtonian Lane-Emden n<0 regime; several low-e_center TOV
+  ! solves failed to converge at all). P_SURFACE moved accordingly: the
+  ! stiffer tail drops pressure much faster with density, so P at the same
+  ! e is ~27x smaller than under the old Gamma.
+  real(wp), parameter :: E_SURFACE = 8.95e0_wp * C**2 * KSCALE
+  real(wp), parameter :: P_SURFACE = 1.307030e18_wp * KSCALE
   real(wp), parameter :: RHO_UNI   = 7.4259154861063358e-19_wp
   real(wp), parameter :: PRS_UNI = rho_uni/(C*1.e5_wp)**2
   real(wp), parameter :: F_UNI     = 2.029739818539300e5_wp
