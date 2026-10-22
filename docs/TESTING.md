@@ -38,6 +38,7 @@ pass/fail per assertion via `tests/unit/test_utils.f90`.
 | `test_eos` | `eos_mod` (PCHIP EOS) | round-trips at 1e-10, `pe_at_h` consistency at 1e-12, dual derivative vs FD at 1e-4, table-edge stability |
 | `test_spectral` | `spectral_hub_mod` | basis orthogonality, derivative recovery |
 | `test_spline` | `spline_mod` | knot-by-knot interpolation, end-condition handling |
+| `test_uryu_inc` | `rotation_law_mod` (`uryu_inc`) | first-integral term G vs Gauss-Legendre quadrature of the law at 1e-12 (p = 0.5, 1, 1.3, 2); equator identity G(lambda-1) = F_e Omega_e c(lambda,p); bulk Omega root vs an analytic flat-metric case at 1e-10, incl. the first-root selection and the axis |
 
 Run individually: `./build/tests/test_<name>`.
 

@@ -8,7 +8,7 @@ module spin_integration_mod
                       r_ratio, r_e, enthalpy_min, s_e, SMAX, &
                       Omega_c, Omega_e, sphi_m, &
                       B_coup, mphi_r, mass, mass_0, ang_mom, &
-                      A_diff, lambda1, lambda2, solver_type, output, timing, eos_file
+                      A_diff, lambda1, lambda2, solver_type, output, timing, eos_file, inc_p, inc_lambda
   use cheb_mod, only: cheb_fit_stats, cheb_std_base, cheb_get_deriv_point
   use eos_mod, only: n0_at_e
   use exporter_mod, only: initial_data_for_sacra_aei
@@ -697,6 +697,7 @@ contains
     case("uniform")
     case("const_j");  write(fname,"(A,A,f5.2)") trim(fname), "_A",  A_diff
     case("uryu");     write(fname,"(A,A,f5.2,A,f5.2)") trim(fname), "_L1", lambda1, "_L2", lambda2
+    case("uryu_inc"); write(fname,"(A,A,f5.2,A,f5.3)") trim(fname), "_Pinc", inc_p, "_Lam", inc_lambda
     case default;     stop "Unknown solver type"
     end select
     fname = trim(fname)//".dat"

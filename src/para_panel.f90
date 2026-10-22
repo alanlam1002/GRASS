@@ -58,6 +58,9 @@ module para_mod
   real(wp) :: lambda2 = 0.72_wp
   integer :: uryu_p  = 1
   integer :: uryu_q  = 3
+  real(wp) :: inc_p = 0.5_wp
+  real(wp) :: inc_lambda = 1.2_wp
+  real(wp) :: inc_A2 = 0.0_wp
 
   real(wp) :: parA = 1.0_wp
   real(wp) :: parB = 1.0_wp
@@ -231,6 +234,10 @@ contains
     end select
 
     solver_type = trim(to_lower_str(adjustl(solver_type)))
+    if (trim(solver_type) == "uryu_inc") then
+      if (inc_p <= 0.0_wp) error stop "initialize_theory: uryu_inc needs inc_p > 0"
+      if (inc_lambda <= 1.0_wp) error stop "initialize_theory: uryu_inc needs inc_lambda > 1"
+    end if
 
     DS   = SMAX / (real(SDIV, wp) - 1.0_wp)
     DM   = 1.0_wp  / (real(MDIV, wp) - 1.0_wp)
@@ -248,7 +255,7 @@ contains
                     Mb_goal, J_goal, M_goal, chi_goal, omc_goal, &
                     run_task, run_mode, shooting, FIX1, FIX2, &
                     SDIV, MDIV, eos_file, e_center_default, output, timing, &
-                    r_ratio, regrid_e_center
+                    r_ratio, regrid_e_center, inc_p, inc_lambda
 
     inquire(file="./para.nml", exist=there)
     if (.not. there) return

@@ -85,7 +85,8 @@ contains
                          lambda1, lambda2, Fmax_h, F_equator_h, timing
     use rotation_law_mod, only: diff_rotation_const_j, rotation_law_const_j, &
                                 diff_rotation_uryu, rotation_law_uryu, &
-                                cache_uryu_ab, ctx_exp2re2rho
+                                cache_uryu_ab, ctx_exp2re2rho, &
+                                diff_rotation_uryu_inc, uryu_inc_omega
     use brent_mod, only : find_omega_e, zbrent_rot
     real(wp), intent(in) :: r_e_new, gama_pole_h, rho_pole_h, gama_equator_h, rho_equator_h
     real(wp), intent(in) :: sphi_pole_h, sphi_equator_h, ww_equator_h
@@ -123,11 +124,50 @@ contains
         call const_j_rotation(re2_val)
       case("uryu")
         call uryu_rotation(re2_val)
+      case("uryu_inc")
+        call uryu_inc_rotation(re2_val)
       case default
         error stop "Unknown solver type"
       end select
     end associate
   contains
+    subroutine uryu_inc_rotation(re2_val)
+      use para_mod, only: inc_p, inc_lambda, inc_A2, s_e
+      real(wp), intent(in) :: re2_val
+      real(wp) :: guess, F_e
+      logical :: found
+
+      guess = Omega_e * GUESS_FACTOR
+      call find_omega_e(guess, r_e_new, rho_equator_h, gama_equator_h, &
+                      ww_equator_h, rho_pole_h, gama_pole_h, TOLERANCE_ROOT, Omega_e, diff_rotation_uryu_inc)
+      F_e = (Omega_e - ww_equator_h) / ( exp(2.0_wp * re2_val * rho_equator_h) - (Omega_e - ww_equator_h)**2 )
+      if (F_e <= 0.0_wp) error stop "uryu_inc_rotation: F_e <= 0 at the equator"
+      Omega_c = Omega_e / inc_lambda
+      inc_A2 = F_e / ( Omega_e * (inc_lambda - 1.0_wp)**inc_p )
+
+      Omg(1,:) = Omega_c
+      Omg(1:2*SDIV/3,MDIV) = Omega_c
+      F_j(1,:) = 0.0_wp
+      F_j(1:2*SDIV/3,MDIV) = 0.0_wp
+      do s = 2, 2*SDIV/3
+        do m = 1, MDIV-1
+          associate(sg => s_gp(s), mum_loc => mu(m), &
+                    rsm_loc => rho(s,m), wwsm_loc => ww(s,m), o => omg(s,m))
+            call uryu_inc_omega(r_e_new, rsm_loc, wwsm_loc, sg, mum_loc, Omega_c, inc_A2, inc_p, &
+                                Omg(s-1,m) / Omega_c - 1.0_wp, o, found)
+            if (.not. found) then
+              ! Beyond the equatorial surface the increasing law can need Omega above
+              ! the light cylinder; no matter is there, so keep the neighbour's value.
+              if (sg <= s_e) error stop "uryu_inc_rotation: no Omega root inside the star"
+              o = Omg(s-1,m)
+            end if
+            ctx_exp2re2rho = exp(2.0_wp * re2_val * rsm_loc)
+            F_j(s,m) = (o - wwsm_loc) * sg**2 * (1.0_wp - mum_loc**2) &
+                  / (ctx_exp2re2rho * (1.0_wp - sg)**2 - (o - wwsm_loc)**2 * sg**2 * (1.0_wp - mum_loc**2))
+          end associate
+        end do
+      end do
+    end subroutine uryu_inc_rotation
     subroutine const_j_rotation(re2_val)
       real(wp), intent(in) :: re2_val
       real(wp) :: guess, term_omega_diff
@@ -241,8 +281,9 @@ contains
     use para_mod, only : wp, SDIV, MDIV, r_ratio, h_center, &
                          rho, gama, alpha, sphi, velocity_sq, enthalpy, pressure, energy, &
                          Omg, ww, Omega_c, omg, F_j, &
-                         s_gp, has_scalar, B_coup, A_diff, solver_type, enthalpy_min, s_e, timing
-    use rotation_law_mod, only: intF
+                         s_gp, has_scalar, B_coup, A_diff, solver_type, enthalpy_min, s_e, timing, &
+                         inc_p, inc_A2
+    use rotation_law_mod, only: intF, uryu_inc_G
     use eos_mod, only : pe_at_h
     real(wp), intent(in) :: r_e_new, gama_pole_h, rho_pole_h, sphi_pole_h
     real(wp), intent(in) :: sgp_term_2d_cache_arg(:,:), sin_theta_2d_cache_arg(:,:), sgp_2d_cache_arg(:,:)
@@ -296,6 +337,12 @@ contains
       do m = 1, MDIV
         do s = 1, s_active_max
           enthalpy(s,m) = enthalpy(s,m) - intF(omg(s,m), F_j(s,m))
+        end do
+      end do
+    elseif ( trim(solver_type) == "uryu_inc" ) then
+      do m = 1, MDIV
+        do s = 1, s_active_max
+          enthalpy(s,m) = enthalpy(s,m) - uryu_inc_G(omg(s,m) / Omega_c - 1.0_wp, inc_A2, Omega_c, inc_p)
         end do
       end do
     endif

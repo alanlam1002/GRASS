@@ -6,7 +6,7 @@ program grass
   use toolkit_mod, only: debug_mod_bessel
   use para_mod, only: wp, initialize_theory, angular_collocation, run_task, &
                       has_scalar, mphi_goal, scalarton, B_goal, &
-                      solver_type, A_diff, lambda1, lambda2, &
+                      solver_type, A_diff, lambda1, lambda2, inc_p, inc_lambda, &
                       s_gp, SDIV, MDIV, s_pwr, e_surface, C, KSCALE
   use constrain_mod, only: hamiltonian
   use starting_model_mod, only: initialize_starting_model
@@ -39,6 +39,8 @@ program grass
     write(*,'(1X,A,F5.3,A)') "Rotation Law: Constant-J   (A^-1 = ", 1._wp / A_diff, ")"
   case ("uryu")
     write(*,'(1X,A,F5.3,A,F5.3,A)') "Rotation Law: Uryu   (lambda1 = ", lambda1, "  lambda2 = ", lambda2, ")"
+  case ("uryu_inc")
+    write(*,'(1X,A,F6.3,A,F6.3,A)') "Rotation Law: Uryu increasing   (p = ", inc_p, "  lambda = ", inc_lambda, ")"
   case default
     write(*,'(1X,A)') "Rotation Law: Uniform"
   end select

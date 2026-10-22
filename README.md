@@ -155,6 +155,14 @@ and `regrid_e_center`. Anything absent keeps its compiled-in default.
 `regrid_e_center` (g/cm^3, > 0) replaces the restart's central energy
 density in `MODE_REGRID`, e.g. to step a warm-started density chain.
 
+Rotation law `solver_type = "uryu_inc"`: Uryu et al. 2017 (PRD 96,
+103011) eq. (5) with the plus sign, `j = A^2 Omega (Omega/Omega_c - 1)^p`
+for `Omega >= Omega_c`, so `Omega` rises monotonically outward. Set by
+`inc_p` (real, `> 0`) and `inc_lambda = Omega_e/Omega_c` (`> 1`), both in
+`para.nml`; `A` follows from the equator condition. The first integral
+adds `-A^2 Omega_c^2 [x^(p+1)/(p+1) + x^(p+2)/(p+2)]`, `x = Omega/Omega_c - 1`,
+to the log-enthalpy.
+
 ```fortran
 &para
   solver_type = "uniform"
@@ -194,7 +202,7 @@ src/
     spin_workspace_mod.f90     geometry + workspace caching
     spin_updates_mod.f90       metric / scalar field updates
     spin_derivatives_mod.f90   grid derivatives (DGEMM-based when collocated)
-    rotational_law_mod.f90     uniform / const-J / Uryu rotation laws
+    rotational_law_mod.f90     uniform / const-J / Uryu / increasing-Uryu rotation laws
   tool/                        numerical utilities
     toolkit_mod.f90            interp, derivatives, integral accumulation
     ad_mod.f90                 forward-mode AD (dual numbers)

@@ -201,4 +201,110 @@ contains
     diff_Fmax = (lambda1 - omg_max_h / Omega_c)
     diff_sq = diff_Fmax**2
   end subroutine shoot_Fmax
+  ! Increasing Uryu law (Uryu et al. 2017 eq. 5, plus sign): j = A^2 Omega x^p,
+  ! x = Omega/Omega_c - 1 >= 0, parameterized by inc_lambda = Omega_e/Omega_c and
+  ! inc_p > 0 (real). G = int_{Omega_c}^{Omega} j dOmega' is the log-enthalpy term.
+
+  pure real(wp) function uryu_inc_c(lam, p) result(c)
+    real(wp), intent(in) :: lam, p
+    c = ( (lam - 1._wp) / (p + 1._wp) + (lam - 1._wp)**2 / (p + 2._wp) ) / lam**2
+  end function uryu_inc_c
+
+  pure elemental real(wp) function uryu_inc_G(x, A2, omc, p) result(g)
+    real(wp), intent(in) :: x, A2, omc, p
+    real(wp) :: xx
+    xx = max(x, 0._wp)
+    g = A2 * omc**2 * ( xx**(p + 1._wp) / (p + 1._wp) + xx**(p + 2._wp) / (p + 2._wp) )
+  end function uryu_inc_G
+
+  subroutine diff_rotation_uryu_inc(x, fx, re, rho_h, g_h, w_h, rho_p, g_p)
+    use para_mod, only: wp, inc_p, inc_lambda
+    real(wp), intent(in) :: x, re, rho_h, g_h, w_h, rho_p, g_p
+    real(wp), intent(out):: fx
+    real(wp) :: F_e
+    F_e = (x - w_h) / ( exp(2._wp*re**2*rho_h) - (x - w_h)**2 )
+    fx = re**2 * (g_h + rho_h - g_p - rho_p) + log( 1._wp - ((x - w_h)*exp(-re**2*rho_h))**2 ) &
+        + 2._wp * F_e * x * uryu_inc_c(inc_lambda, inc_p)
+  end subroutine diff_rotation_uryu_inc
+
+  ! Bulk root of F_j(Omega) - A^2 Omega x^p = 0 at one (s, mu). F_j grows without
+  ! bound at the light cylinder, so the function returns to positive values there:
+  ! the physical root is the first sign change above Omega_c. It is bracketed by
+  ! marching up geometrically from far below the guess (no Newton: x^p has
+  ! infinite slope at 0 for p < 1) and refined by Illinois regula falsi with
+  ! bisection safeguards.
+  subroutine uryu_inc_omega(re, rho_p, ww_p, sgp, mugp, omc, A2, p, x_guess, omega, found)
+    real(wp), intent(in)  :: re, rho_p, ww_p, sgp, mugp, omc, A2, p, x_guess
+    real(wp), intent(out) :: omega
+    logical, intent(out), optional :: found
+    real(wp) :: e2, sin2, vfac, x_up, xa, xb, xc, fa, fb, fc
+    integer :: it, side
+    real(wp), parameter :: XTOL = 1.e-14_wp
+    integer, parameter :: NSCAN = 20000
+    if (present(found)) found = .true.
+    sin2 = 1._wp - mugp**2
+    vfac = sgp**2 * sin2
+    if (vfac <= tiny(1._wp)) then
+      omega = omc; return
+    end if
+    e2 = exp(2._wp * re**2 * rho_p)
+    x_up = ( ww_p + sqrt(e2) * (1._wp - sgp) / sqrt(vfac) ) / omc - 1._wp
+    xa = 0._wp; fa = f(xa)
+    if (fa < 0._wp) error stop "uryu_inc_omega: F_j < 0 at Omega_c (Omega_c below the frame-dragging rate)"
+    if (fa == 0._wp .or. x_up <= 0._wp) then
+      omega = omc; return
+    end if
+    ! Start well below the guess: a guess beyond the second (light-cylinder) root
+    ! also has f > 0, and marching up from there would miss the physical root.
+    xb = min(max(1.e-3_wp * x_guess, 1.e-12_wp), 0.5_wp * x_up)
+    do it = 1, 2000
+      fb = f(xb)
+      if (fb <= 0._wp) exit
+      xa = xb; fa = fb
+      xb = min(1.5_wp * xb, 0.5_wp * (xb + x_up))
+      if (x_up - xb < XTOL * (1._wp + x_up)) exit
+    end do
+    if (fb > 0._wp) then
+      ! The geometric march can step over a narrow negative interval when the two
+      ! roots are close (fast rotation): scan [0, x_up) linearly for the first one.
+      xa = 0._wp; fa = f(xa)
+      do it = 1, NSCAN
+        xb = x_up * real(it, wp) / real(NSCAN + 1, wp)
+        fb = f(xb)
+        if (fb <= 0._wp) exit
+        xa = xb; fa = fb
+      end do
+      if (fb > 0._wp) then
+        if (present(found)) then
+          found = .false.; omega = omc * (1._wp + x_guess); return
+        end if
+        error stop "uryu_inc_omega: no root below the light cylinder"
+      end if
+    end if
+    side = 0
+    do it = 1, 300
+      if (fb == 0._wp .or. abs(xb - xa) <= XTOL * (1._wp + abs(xb))) exit
+      xc = (xa * fb - xb * fa) / (fb - fa)
+      if (.not. (xc > min(xa, xb) .and. xc < max(xa, xb)) .or. mod(it, 8) == 0) xc = 0.5_wp * (xa + xb)
+      fc = f(xc)
+      if (fc * fb < 0._wp) then
+        xa = xb; fa = fb
+        side = 0
+      else
+        if (side == 1) fa = 0.5_wp * fa
+        side = 1
+      end if
+      xb = xc; fb = fc
+    end do
+    omega = omc * (1._wp + xb)
+  contains
+    real(wp) function f(x)
+      real(wp), intent(in) :: x
+      real(wp) :: o, d
+      o = omc * (1._wp + x)
+      d = e2 * (1._wp - sgp)**2 - (o - ww_p)**2 * vfac
+      f = (o - ww_p) * vfac / d - A2 * o * x**p
+    end function f
+  end subroutine uryu_inc_omega
+
 end module rotation_law_mod
