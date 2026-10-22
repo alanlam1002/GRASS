@@ -77,6 +77,7 @@ module para_mod
   real(wp) :: h_center = 0.0_wp
   real(wp) :: e_center = 0.0_wp
   real(wp) :: e_center_default = .8e15_wp
+  real(wp) :: regrid_e_center = -1.0_wp
   real(wp) :: enthalpy_min = 0.0_wp
 
   ! -- Grid configuration ----------------------------------------------------
@@ -219,6 +220,7 @@ contains
   end function to_lower_str
 
   subroutine initialize_theory()
+    call load_para_nml()
     select case (active_theory)
     case (THEORY_GR)
       call apply_gr_defaults()
@@ -238,6 +240,31 @@ contains
 
     call allocate_fields()
   end subroutine initialize_theory
+
+  subroutine load_para_nml()
+    integer :: u, ios
+    logical :: there
+    namelist /para/ solver_type, A_diff, lambda1, lambda2, uryu_p, uryu_q, &
+                    Mb_goal, J_goal, M_goal, chi_goal, omc_goal, &
+                    run_task, run_mode, shooting, FIX1, FIX2, &
+                    SDIV, MDIV, eos_file, e_center_default, output, timing, &
+                    r_ratio, regrid_e_center
+
+    inquire(file="./para.nml", exist=there)
+    if (.not. there) return
+    open(newunit=u, file="./para.nml", status="old", action="read", iostat=ios)
+    if (ios /= 0) then
+      write(*,*) "load_para_nml: cannot open ./para.nml, using compiled defaults"
+      return
+    end if
+    read(u, nml=para, iostat=ios)
+    close(u)
+    if (ios /= 0) then
+      write(*,*) "load_para_nml: ERROR reading ./para.nml, iostat=", ios
+      error stop "bad para.nml"
+    end if
+    write(*,*) "load_para_nml: applied overrides from ./para.nml"
+  end subroutine load_para_nml
 
   subroutine apply_runtime_overrides()
     character(len=64) :: buf

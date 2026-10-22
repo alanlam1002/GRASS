@@ -145,6 +145,26 @@ integer :: MDIV = 41                         ! angular grid
 See `src/para_panel.f90` for the full list (rotation law, shooting target,
 relaxation thresholds, output verbosity).
 
+Runtime overrides: if `./para.nml` exists in the working directory, its
+`&para` namelist is read first in `initialize_theory`, so a parameter
+search needs no rebuild. Recognised: `solver_type`, `A_diff`, `lambda1`,
+`lambda2`, `uryu_p`, `uryu_q`, `Mb_goal`, `J_goal`, `M_goal`, `chi_goal`,
+`omc_goal`, `run_task`, `run_mode`, `shooting`, `FIX1`, `FIX2`, `SDIV`,
+`MDIV`, `eos_file`, `e_center_default`, `output`, `timing`, `r_ratio`
+and `regrid_e_center`. Anything absent keeps its compiled-in default.
+`regrid_e_center` (g/cm^3, > 0) replaces the restart's central energy
+density in `MODE_REGRID`, e.g. to step a warm-started density chain.
+
+```fortran
+&para
+  solver_type = "uniform"
+  run_task = 3
+  run_mode = 1
+  r_ratio = 0.85
+  regrid_e_center = 7.157e14
+/
+```
+
 ---
 
 ## Repository Layout

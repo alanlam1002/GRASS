@@ -6,7 +6,7 @@ module starting_model_mod
   use regrid_mod, only: regrid_read
   use sphere_mod, only: sphere
   use para_mod, only: run_mode, MODE_REGRID, C, KSCALE, KAPPA, &
-                      SDIV, MDIV, e_center, e_center_default, p_center, h_center, &
+                      SDIV, MDIV, e_center, e_center_default, p_center, h_center, regrid_e_center, &
                       solver_type, r_ratio, shooting, SHOOT_2D, output, &
                       active_theory, THEORY_GR, mphi_goal, &
                       mphi_burn_threshold, B_coup, B_goal, mphi_r, l_uni
@@ -40,6 +40,9 @@ contains
       ! previous converged run) rather than the old hard-coded .74e15_wp --
       ! that hard-code ignored e_center_default/the previous model's own
       ! central density entirely.
+      ! regrid_e_center > 0 (g/cm^3, from para.nml) moves a warm start to a new
+      ! central density, e.g. one step of a density chain.
+      if (regrid_e_center > 0.0_wp) e_center = regrid_e_center * C * C * KSCALE
       p_center = p_at_e(e_center)
       h_center = h_at_p(p_center)
     case default
