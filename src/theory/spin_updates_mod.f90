@@ -305,6 +305,9 @@ contains
             ctx_exp2re2rho = exp(2.0_wp * re2_val * rsm_loc)
             call uryu_omega(r_e_new, rsm_loc, wwsm_loc, sg, mum_loc, Omg(s-1,m), o, found)
             if (.not. found) then
+              ! f(omega+) = omega/Omega_c - 1 >= 0 means Omega_c is below the local frame-dragging rate: the root has F_j < 0
+              ! (j < 0 near the axis, so j^2 cannot rise outward: Rayleigh-unstable). The law's edge, as in uryu_inc.
+              if (wwsm_loc >= Omega_c) error stop "uryu_rotation_analytic: Omega_c below the frame-dragging rate (F_j < 0)"
               if (enthalpy(s,m) > enthalpy_min) error stop "uryu_rotation_analytic: no Omega root inside the star"
               o = Omg(s-1,m)
             end if
