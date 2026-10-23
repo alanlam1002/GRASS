@@ -150,8 +150,8 @@ Runtime overrides: if `./para.nml` exists in the working directory, its
 search needs no rebuild. Recognised: `solver_type`, `A_diff`, `lambda1`,
 `lambda2`, `uryu_p`, `uryu_q`, `Mb_goal`, `J_goal`, `M_goal`, `chi_goal`,
 `omc_goal`, `run_task`, `run_mode`, `shooting`, `FIX1`, `FIX2`, `SDIV`,
-`MDIV`, `eos_file`, `e_center_default`, `output`, `timing`, `r_ratio`
-and `regrid_e_center`. Anything absent keeps its compiled-in default.
+`MDIV`, `eos_file`, `e_center_default`, `output`, `timing`, `r_ratio`,
+`regrid_e_center`, `inc_p`, `inc_lambda` and `uryu_fmax_mode`. Anything absent keeps its compiled-in default.
 `regrid_e_center` (g/cm^3, > 0) replaces the restart's central energy
 density in `MODE_REGRID`, e.g. to step a warm-started density chain.
 
@@ -162,6 +162,18 @@ for `Omega >= Omega_c`, so `Omega` rises monotonically outward. Set by
 `para.nml`; `A` follows from the equator condition. The first integral
 adds `-A^2 Omega_c^2 [x^(p+1)/(p+1) + x^(p+2)/(p+2)]`, `x = Omega/Omega_c - 1`,
 to the log-enthalpy.
+
+Uryu law (8), `solver_type = "uryu"`: `uryu_fmax_mode` (`"relax"`, the
+default, or `"analytic"`) sets how `Fmax`, the `F` of the `Omega` peak, is
+found. `"relax"` iterates `Fmax` until the equatorial peak equals
+`lambda1 Omega_c`. Since `A` and `B` already give `Omega(Fmax) = lambda1
+Omega_c`, that is a tangent root, and the fixed-step update can run away
+(the `lambda1`/`lambda2` walls). `"analytic"` instead imposes
+`dOmega/dF = 0` at `Fmax`, which fixes `Fmax/F_e` as the root of
+`p lambda2 (lambda1-1) - (p+q) lambda1 (lambda1-1) y^q + q lambda1
+(lambda2-1) y^(p+q) = 0` (independent of the star). It needs `lambda1 > 1`
+and `0 < lambda2 < 1`. The bulk `Omega` root is then bracketed inside
+`omega < Omega < Omega_lc`, with a scan fallback.
 
 ```fortran
 &para

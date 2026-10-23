@@ -82,11 +82,13 @@ contains
                                     sphi_pole_h, sphi_equator_h, ww_equator_h)
     use para_mod, only : wp, SDIV, MDIV, s_gp, mu, rho, ww, omg, r_ratio, &
                          Omega_c, Omega_e, Omg, F_j, has_scalar, B_coup, A_diff, solver_type, &
-                         lambda1, lambda2, Fmax_h, F_equator_h, timing
+                         lambda1, lambda2, uryu_p, uryu_q, uryu_fmax_mode, enthalpy, enthalpy_min, &
+                         Fmax_h, F_equator_h, timing
     use rotation_law_mod, only: diff_rotation_const_j, rotation_law_const_j, &
                                 diff_rotation_uryu, rotation_law_uryu, &
                                 cache_uryu_ab, ctx_exp2re2rho, &
-                                diff_rotation_uryu_inc, uryu_inc_omega
+                                diff_rotation_uryu_inc, uryu_inc_omega, &
+                                uryu_fmax_ratio, uryu_y_star, diff_rotation_uryu_an, uryu_omega
     use brent_mod, only : find_omega_e, zbrent_rot
     real(wp), intent(in) :: r_e_new, gama_pole_h, rho_pole_h, gama_equator_h, rho_equator_h
     real(wp), intent(in) :: sphi_pole_h, sphi_equator_h, ww_equator_h
@@ -200,6 +202,9 @@ contains
       integer :: s_lo, s_hi, s_peak
       integer, parameter :: DELTA_PEAK = 3
 
+      if (trim(uryu_fmax_mode) == "analytic") then
+        call uryu_rotation_analytic(re2_val); return
+      end if
       if (.not. allocated(omg_mu_0_saved)) allocate(omg_mu_0_saved(SDIV), source=0.0_wp)
       exp_term_eq = exp(2.0_wp * re2_val * rho_equator_h)
 
@@ -274,6 +279,41 @@ contains
         end do
       end do
     end subroutine uryu_rotation
+
+    subroutine uryu_rotation_analytic(re2_val)
+      ! Law (8) with Fmax = y* F_e (rotation_law_mod::uryu_fmax_ratio): one equator root, no Fmax iteration, then the
+      ! bulk Omega root per point by rotation_law_mod::uryu_omega (bracketed inside the physical interval).
+      real(wp), intent(in) :: re2_val
+      real(wp) :: exp_term_eq, guess
+      logical :: found
+      exp_term_eq = exp(2.0_wp * re2_val * rho_equator_h)
+      uryu_y_star = uryu_fmax_ratio(lambda1, lambda2, uryu_p, uryu_q)
+      guess = Omega_e
+      call find_omega_e(guess, r_e_new, rho_equator_h, gama_equator_h, ww_equator_h, &
+                        rho_pole_h, gama_pole_h, TOLERANCE_ROOT, Omega_e, diff_rotation_uryu_an)
+      F_equator_h = (Omega_e - ww_equator_h) / ( exp_term_eq - (Omega_e - ww_equator_h)**2 )
+      if ( F_equator_h <= 0.0_wp ) error stop "uryu_rotation_analytic: F_e <= 0 at the equator"
+      Fmax_h = uryu_y_star * F_equator_h
+      Omega_c = Omega_e / lambda2
+      call cache_uryu_ab()
+      Omg(1,:) = Omega_c
+      Omg(1:3*SDIV/4,MDIV) = Omega_c
+      do s = 2, SDIV*3/4
+        do m = 1, MDIV-1
+          associate(sg => s_gp(s), mum_loc => mu(m), &
+                    rsm_loc => rho(s,m), wwsm_loc => ww(s,m), o => omg(s,m))
+            ctx_exp2re2rho = exp(2.0_wp * re2_val * rsm_loc)
+            call uryu_omega(r_e_new, rsm_loc, wwsm_loc, sg, mum_loc, Omg(s-1,m), o, found)
+            if (.not. found) then
+              if (enthalpy(s,m) > enthalpy_min) error stop "uryu_rotation_analytic: no Omega root inside the star"
+              o = Omg(s-1,m)
+            end if
+            F_j(s,m) = (o - wwsm_loc) * sg**2 * (1.0_wp - mum_loc**2) &
+                  / (ctx_exp2re2rho * (1.0_wp - sg)**2 - (o - wwsm_loc)**2 * sg**2 * (1.0_wp - mum_loc**2))
+          end associate
+        end do
+      end do
+    end subroutine uryu_rotation_analytic
   end subroutine update_angular_velocity
 
   subroutine update_eos_and_velocity(r_e_new, gama_pole_h, rho_pole_h, sphi_pole_h, &

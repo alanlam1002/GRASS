@@ -61,6 +61,9 @@ module para_mod
   real(wp) :: inc_p = 0.5_wp
   real(wp) :: inc_lambda = 1.2_wp
   real(wp) :: inc_A2 = 0.0_wp
+  ! uryu (law 8): how Fmax is set. "relax" (default): iterate Fmax until the equatorial peak equals lambda1 (the
+  ! original scheme). "analytic": Fmax = y* F_e from dOmega/dF = 0 at Fmax (rotation_law_mod::uryu_fmax_ratio).
+  character(len=16) :: uryu_fmax_mode = "relax"
 
   real(wp) :: parA = 1.0_wp
   real(wp) :: parB = 1.0_wp
@@ -238,6 +241,13 @@ contains
       if (inc_p <= 0.0_wp) error stop "initialize_theory: uryu_inc needs inc_p > 0"
       if (inc_lambda <= 1.0_wp) error stop "initialize_theory: uryu_inc needs inc_lambda > 1"
     end if
+    uryu_fmax_mode = trim(to_lower_str(adjustl(uryu_fmax_mode)))
+    if (trim(solver_type) == "uryu") then
+      if (trim(uryu_fmax_mode) /= "relax" .and. trim(uryu_fmax_mode) /= "analytic") &
+        error stop "initialize_theory: uryu_fmax_mode must be relax or analytic"
+      if (trim(uryu_fmax_mode) == "analytic" .and. .not. (lambda1 > 1.0_wp .and. lambda2 > 0.0_wp .and. lambda2 < 1.0_wp)) &
+        error stop "initialize_theory: uryu_fmax_mode analytic needs lambda1 > 1 and 0 < lambda2 < 1"
+    end if
 
     DS   = SMAX / (real(SDIV, wp) - 1.0_wp)
     DM   = 1.0_wp  / (real(MDIV, wp) - 1.0_wp)
@@ -255,7 +265,7 @@ contains
                     Mb_goal, J_goal, M_goal, chi_goal, omc_goal, &
                     run_task, run_mode, shooting, FIX1, FIX2, &
                     SDIV, MDIV, eos_file, e_center_default, output, timing, &
-                    r_ratio, regrid_e_center, inc_p, inc_lambda
+                    r_ratio, regrid_e_center, inc_p, inc_lambda, uryu_fmax_mode
 
     inquire(file="./para.nml", exist=there)
     if (.not. there) return

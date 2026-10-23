@@ -6,6 +6,7 @@ module rotation_law_mod
   real(wp), save :: ctx_rho_pole_h, ctx_gama_pole_h
   real(wp), save :: cached_aa = 0._wp, cached_bb = 0._wp
   real(wp), save :: ctx_exp2re2rho = 1._wp
+  real(wp), save :: uryu_y_star = 0._wp        ! Fmax/F_e of law (8) in uryu_fmax_mode = "analytic" (uryu_fmax_ratio)
   private :: AA_h, BB_h
 contains
 
@@ -201,6 +202,170 @@ contains
     diff_Fmax = (lambda1 - omg_max_h / Omega_c)
     diff_sq = diff_Fmax**2
   end subroutine shoot_Fmax
+
+  ! ------------------------------------------------------------------------
+  ! Uryu law (8) with an analytic Fmax (uryu_fmax_mode = "analytic").
+  ! Omega/Omega_c = (1 + (F/B)^p) / (1 + (F/A)^(p+q)), with A and B fixed by
+  ! Omega(Fmax) = lambda1 Omega_c and Omega(F_e) = lambda2 Omega_c (AA_h, BB_h).
+  ! The relaxation in uryu_rotation iterates Fmax until the equatorial peak
+  ! equals lambda1. Since Omega(Fmax) = lambda1 Omega_c by construction, the
+  ! peak is >= lambda1 for every Fmax, with equality only where Fmax is the
+  ! law's own maximum: a tangent (double) root, which the fixed-step update
+  ! can miss. Imposing dOmega/dF = 0 at Fmax on the closed-form A, B instead
+  ! gives p/B^p = lambda1 (p+q) Fmax^q / A^(p+q), i.e. with y = Fmax/F_e
+  !   h(y) = p lambda2 (lambda1-1) - (p+q) lambda1 (lambda1-1) y^q
+  !          + q lambda1 (lambda2-1) y^(p+q) = 0,
+  ! independent of F_e. A^(p+q) > 0 needs y < y_max = (lambda2/lambda1)^(1/q);
+  ! h(0) > 0, h(y_max) = q lambda2 ((lambda2-1) y_max^p - (lambda1-1)) < 0,
+  ! and h is decreasing for lambda2 < 1: one root, so Fmax = y* F_e with no
+  ! iteration, and F_e > (lambda1/lambda2)^(1/q) Fmax holds automatically
+  ! (safe_F_e is never active).
+  ! ------------------------------------------------------------------------
+  pure real(wp) function uryu_h(y, lam1, lam2, p, q) result(h)
+    real(wp), intent(in) :: y, lam1, lam2
+    integer, intent(in)  :: p, q
+    h = real(p, wp) * lam2 * (lam1 - 1._wp) - real(p+q, wp) * lam1 * (lam1 - 1._wp) * y**q &
+        + real(q, wp) * lam1 * (lam2 - 1._wp) * y**(p+q)
+  end function uryu_h
+
+  real(wp) function uryu_fmax_ratio(lam1, lam2, p, q) result(y)
+    ! y* = Fmax/F_e: bisection on (0, y_max) to machine precision
+    real(wp), intent(in) :: lam1, lam2
+    integer, intent(in)  :: p, q
+    real(wp) :: a, b, ha, hm
+    integer :: it
+    if (lam1 <= 1._wp .or. lam2 <= 0._wp .or. lam2 >= 1._wp) &
+      error stop "uryu_fmax_ratio: analytic Fmax needs lambda1 > 1 and 0 < lambda2 < 1"
+    a = 0._wp; b = (lam2 / lam1)**(1._wp / real(q, wp))
+    ha = uryu_h(a, lam1, lam2, p, q)
+    if (.not. (ha > 0._wp .and. uryu_h(b, lam1, lam2, p, q) < 0._wp)) &
+      error stop "uryu_fmax_ratio: h(y) does not change sign on (0, y_max)"
+    do it = 1, 200
+      y = 0.5_wp * (a + b)
+      hm = uryu_h(y, lam1, lam2, p, q)
+      if ((hm > 0._wp) .eqv. (ha > 0._wp)) then
+        a = y; ha = hm
+      else
+        b = y
+      end if
+      if (b - a <= 4._wp * epsilon(1._wp) * b) exit
+    end do
+    y = 0.5_wp * (a + b)
+  end function uryu_fmax_ratio
+
+  subroutine diff_rotation_uryu_an(x, fx, re, rho_h, g_h, w_h, rho_p, g_p)
+    ! Equator equation of law (8) with Fmax = uryu_y_star * F_e (analytic mode); otherwise as diff_rotation_uryu,
+    ! without the safe_F_e clamp (never needed here). F_e <= 0 (x at or below the frame-dragging rate) is outside the
+    ! law's domain and returns NaN, which brent_core steps back from.
+    use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan
+    use para_mod, only: wp, lambda2, Fmax_h
+    implicit none
+    real(wp), intent(in) :: x, re, rho_h, g_h, w_h, rho_p, g_p
+    real(wp), intent(out):: fx
+    real(wp) :: F_e, ocre, RHS, aa, bb, log_arg, Fm
+    F_e  = (x - w_h) / ( exp(2._wp*re**2*rho_h) - (x-w_h)**2 )
+    log_arg = 1._wp - ((x-w_h)*exp(-re**2*rho_h))**2
+    if (F_e <= 0._wp .or. log_arg <= 0._wp) then
+      fx = ieee_value(fx, ieee_quiet_nan); return
+    end if
+    ocre = x / lambda2
+    Fm = uryu_y_star * F_e
+    Fmax_h = Fm
+    aa = AA_h(F_e, Fm)
+    bb = BB_h(F_e, Fm)
+    RHS = F_e * x - aa * ocre / 4._wp * &
+          (2._wp * aa / bb * atan(F_e**2/aa**2) &
+          - sqrt(2._wp) * ( atan(1._wp - F_e*sqrt(2._wp)/aa) - atan(1._wp + F_e*sqrt(2._wp)/aa) ) &
+          + sqrt(2._wp) * ATANH( aa * F_e * sqrt(2._wp) / (F_e**2 + aa**2) ) )
+    fx = re**2 * (g_h + rho_h - g_p - rho_p) + log(log_arg) + 2._wp * RHS
+  end subroutine diff_rotation_uryu_an
+
+  subroutine uryu_omega(re, rho_p, ww_p, sgp, mugp, x_guess, omega, found)
+    ! Bulk Omega root of law (8) at one grid point, restricted to the physical interval w < Omega < Omega_lc (above the
+    ! local frame-dragging rate, below the light cylinder, where F_j runs from 0 to +infinity):
+    !   f(x) = x/Omega_c (1 + (F/A)^(p+q)) - (1 + (F/B)^p),
+    ! with f -> +infinity at the light cylinder. Bracket outward from the guess (geometric steps in the distance from
+    ! the guess, clipped to the interval), else a linear scan of the interval; of the sign changes, the one nearest
+    ! the guess is taken (continuity with the neighbour). Refinement: Illinois regula falsi with bisection every 8
+    ! iterations. found = .false. if the interval has no sign change.
+    use para_mod, only: wp, uryu_p, uryu_q, Omega_c
+    real(wp), intent(in)  :: re, rho_p, ww_p, sgp, mugp, x_guess
+    real(wp), intent(out) :: omega
+    logical, intent(out)  :: found
+    integer, parameter :: NSCAN = 4000, NGROW = 200
+    real(wp) :: vfac, e2, xlo, xhi, g, dlt, a, b, fa, fb, c, fc, xs(0:NSCAN), fs(0:NSCAN)
+    integer :: k, it, side, best
+    real(wp) :: dbest
+    found = .false.; omega = x_guess
+    vfac = sgp**2 * (1._wp - mugp**2)
+    if (vfac <= 0._wp) then
+      omega = Omega_c; found = .true.; return
+    end if
+    e2 = ctx_exp2re2rho
+    xlo = ww_p
+    xhi = ww_p + sqrt(e2) * (1._wp - sgp) / sqrt(vfac)
+    dlt = (xhi - xlo) * 1.e-12_wp
+    xlo = xlo + dlt; xhi = xhi - dlt
+    g = min(max(x_guess, xlo), xhi)
+    ! outward bracketing from the guess on both sides
+    do k = 1, NGROW
+      dlt = (xhi - xlo) * 1.e-6_wp * 1.5_wp**(k-1)
+      a = max(xlo, g - dlt); b = min(xhi, g + dlt)
+      fa = f(a); fb = f(b)
+      if (fa * fb <= 0._wp .and. fa == fa .and. fb == fb) then
+        ! a sign change in [a, b]: locate the one nearest g by checking each half
+        if (f(g) * fa <= 0._wp) then
+          b = g; fb = f(g)
+        else if (f(g) * fb <= 0._wp) then
+          a = g; fa = f(g)
+        end if
+        found = .true.; exit
+      end if
+      if (a <= xlo .and. b >= xhi) exit
+    end do
+    if (.not. found) then
+      do k = 0, NSCAN
+        xs(k) = xlo + (xhi - xlo) * real(k, wp) / real(NSCAN, wp); fs(k) = f(xs(k))
+      end do
+      best = -1; dbest = huge(1._wp)
+      do k = 1, NSCAN
+        if (fs(k-1) * fs(k) <= 0._wp .and. fs(k-1) == fs(k-1) .and. fs(k) == fs(k)) then
+          if (abs(0.5_wp * (xs(k-1) + xs(k)) - g) < dbest) then
+            dbest = abs(0.5_wp * (xs(k-1) + xs(k)) - g); best = k
+          end if
+        end if
+      end do
+      if (best < 0) return
+      a = xs(best-1); fa = fs(best-1); b = xs(best); fb = fs(best); found = .true.
+    end if
+    if (fa == 0._wp) then; omega = a; return; end if
+    if (fb == 0._wp) then; omega = b; return; end if
+    side = 0
+    do it = 1, 200
+      if (mod(it, 8) == 0) then
+        c = 0.5_wp * (a + b)
+      else
+        c = (a * fb - b * fa) / (fb - fa)
+      end if
+      fc = f(c)
+      if (fc == 0._wp .or. abs(b - a) <= 1.e-14_wp * abs(c)) exit
+      if (fc * fb < 0._wp) then
+        a = b; fa = fb; b = c; fb = fc; side = 0
+      else
+        b = c; fb = fc
+        if (side == -1) fa = 0.5_wp * fa
+        side = -1
+      end if
+    end do
+    omega = c
+  contains
+    real(wp) function f(x)
+      real(wp), intent(in) :: x
+      real(wp) :: Fj
+      Fj = (x - ww_p) * vfac / (e2 * (1._wp - sgp)**2 - (x - ww_p)**2 * vfac)
+      f = x / Omega_c * (1._wp + (Fj / cached_aa)**(uryu_p + uryu_q)) - (1._wp + (Fj / cached_bb)**uryu_p)
+    end function f
+  end subroutine uryu_omega
   ! Increasing Uryu law (Uryu et al. 2017 eq. 5, plus sign): j = A^2 Omega x^p,
   ! x = Omega/Omega_c - 1 >= 0, parameterized by inc_lambda = Omega_e/Omega_c and
   ! inc_p > 0 (real). G = int_{Omega_c}^{Omega} j dOmega' is the log-enthalpy term.
